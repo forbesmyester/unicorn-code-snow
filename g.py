@@ -1,6 +1,7 @@
 import time
 import sys
-from geopy import distance, Point
+from geopy import distance as gDistance, Point
+from math import sin, cos, pi
 import datetime
 import fileinput
 import re as re
@@ -26,6 +27,12 @@ def myReduce(f, init, lst):
 def tail(arr):
     return arr[1:]
 
+
+angles = [0, 45, 90, 135, 180, 225, 270, 315]
+directions = [[0, -1], [-1, 1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]]
+distances = [1, 4, 16, 64]
+
+
 parser = argparse.ArgumentParser(description='UI for progress on journey home!')
 parser.add_argument('--home', nargs=1, help='The lat,long of home, as given by google maps', required=True)
 parser.add_argument('--time', nargs=1, default=int(datetime.datetime.utcnow().timestamp()), help='The current time (for testing)', required=False)
@@ -48,7 +55,7 @@ def getHome(homeConfig):
 
 # WARNING: Mutation
 def addDistance(home, line):
-    line['distance'] = distance.distance(Point(home['lat'], home['lng']), Point(line['lat'], line['lng'])).km
+    line['distance'] = gDistance.distance(Point(home['lat'], home['lng']), Point(line['lat'], line['lng'])).km
     return line
 
 def keyFuncByTime(lineWithDistance):
@@ -97,20 +104,27 @@ def getSmoothedSpeedMaths(acc, line):
         'speed': s
     }
 
-def getRoughAngle(fromA, toB):
+def getAngle(angleAttempts, fromA, toB):
     start = Point(toB['lat'], toB['lng'])
-    travelDistance = distance.VincentyDistance(kilometers = 0.01)
+    travelDistance = gDistance.VincentyDistance(kilometers = 0.01)
     def worker(acc, bearing):
         destination = travelDistance.destination(point=start, bearing=bearing)
-        distancePoint = distance.distance(
+        distancePoint = gDistance.distance(
             Point(fromA['lat'], fromA['lng']),
             Point(destination.latitude, destination.longitude)
         ).km
         if (distancePoint > acc['distance']):
             return { 'bearing': bearing, 'distance': distancePoint }
         return acc
-    r = reduce(worker, [0, 45, 90, 135, 180, 225, 270, 315], { 'bearing': -1, 'distance': -1 })
+    r = reduce(worker, angleAttempts, { 'bearing': -1, 'distance': -1 })
     return r['bearing']
+
+def getGoodAngle(fromA, toB):
+    return getAngle(range(0, 360, 1), fromA, toB)
+
+def getRoughAngle(fromA, toB):
+    return getAngle(angles, fromA, toB)
+
 
 def getNames(lines):
     return list(set(map(lambda a: a['name'], lines)))
@@ -146,50 +160,145 @@ def getDataFor(name, lines):
 lines = list(getLines(sys.stdin))
 names = getNames(lines)
 
-houseSmall = [     [0, -2],
-         [-1, -1], [0, -1], [1, -1],
-         [-1, 0],  [0, 0],  [1, 0],
-         ]
+houseSprite = [
 
-houseBig = [                 [0, -2],
-                   [-1, -1], [0, -1], [1, -1],
-         [-2, 0],  [-1, 0],  [0, 0],  [1, 0],  [2, 0],
-         [-2, 1], [-1, 1],           [1, 1],   [2, 1],
-         [-2, 2], [-1, 2],           [1, 2],   [2, 2],
-         ]
+    [                      [0, 0]
+    ],
 
-def getSpritePixels(xy, rgb, sprite):
+    [
+                           [0, -1],
+                 [-1, 0],  [0, 0],  [1, 0],
+                 [-1, 1],  [0, 1],  [1, 1]
+    ],
+
+    [
+                           [0, -2],
+                 [-1, -1], [0, -1], [1, -1],
+        [-2, 0], [-1, 0],  [0, 0],  [1, 0],  [2, 0],
+        [-2, 1], [-1, 1],  [0, 1],  [1, 1],  [2, 1],
+        [-2, 2], [-1, 2],  [0, 2],  [1, 2],  [2, 2]
+    ],
+
+    [
+                                     [0, -3],
+                           [-1, -2], [0, -2], [1, -2],
+                 [-2, -1], [-1, -1], [0, -1], [1, -1], [2, -1],
+        [-3, 0], [-2, 0],  [-1, 0],  [0, 0],  [1, 0],  [2, 0],  [3, 0],
+        [-3, 1], [-2, 1],  [-1, 1],  [0, 1],  [1, 1],  [2, 1],  [3, 1],
+        [-3, 2], [-2, 2],  [-1, 2],  [0, 2],  [1, 2],  [2, 2],  [3, 2],
+        [-3, 3], [-2, 3],  [-1, 3],  [0, 3],  [1, 3],  [2, 3],  [3, 3],
+    ],
+]
+
+# def full(rgb):
+#     r = []
+#     for x in range(0, 15):
+#         for y in range(0, 15):
+#             r.push({'x': x, 'y': y, 'r': rgb['r'], 'g': rgb['g'], 'b': rgb['b']})
+#     return r
+
+
+def getSpritePixels(xy, rgb, sprite, zeroIsFull=False):
+    # if (len(sprite) == 0) and zeroIsFull:
+    #     return full(rgb)
     def spriteMapper(xy, rgb, spriteCell):
         return {'x': xy['x'] + spriteCell[0], 'y': xy['y'] + spriteCell[1], 'r': rgb['r'], 'g': rgb['g'], 'b': rgb['b']}
     p = partial(spriteMapper, xy, rgb)
     return map(p, sprite)
 
 def drawSpritePixels(unicornhathdspritePixels):
-    print(unicornhathdspritePixels)
     for p in unicornhathdspritePixels:
-        print(p)
-        unicornhathd.set_pixel(p['x'], p['y'], p['r'], p['g'], p['b'])
+        if (p['x'] < 15) and (p['x'] > 0) and (p['y'] < 15) and (p['y'] > 0):
+            unicornhathd.set_pixel(15 - p['x'], p['y'], p['r'], p['g'], p['b'])
+
+def getScaleSpriteIndex(distance):
+    r = 0
+    for d in distances:
+        if distance < d:
+            return r
+        r = r + 1
+        if r == 4:
+            return -1
+
+def getScaleSpriteDistance(distance):
+    i = getScaleSpriteIndex(distance)
+    if i == -1:
+        return distance
+    return distances[i]
+
+def getScaleSpriteSize(distance):
+    s = getScaleSpriteIndex(distance)
+    if s == -1:
+        return 0
+    return 3 - s
+
+
+def getScaleSprite(isLeft, scaleSpriteSize):
+    def m():
+        if isLeft:
+            return 1
+        return -1
+
+    r = []
+    for p in range(scaleSpriteSize):
+        r.append([p * m(), 0])
+    return r
+
+def getPersonSprite(pixelCount, screenDistance, personDistance, angle):
+    pixelMultiplier = ((personDistance / screenDistance) * pixelCount)
+    return [[
+        round(pixelMultiplier * sin(angle*(pi/180))),
+        0 - round(pixelMultiplier * cos(angle*(pi/180))),
+    ]]
+
+maxDistance = sorted(lines, key=keyFuncByTime, reverse=True)[0]['distance']
+
+def getHousePosition(angle):
+    direction = directions[angles.index(angle)]
+    housePositions = [[8, 2], [2, 13], [13, 8], [13, 13], [8, 13], [2, 13], [2, 8], [2, 2]]
+    return {'x': 8 + (direction[0] * 5), 'y': 8 + (direction[1] * 5)}
+
 
 for n in names:
     data = list(getDataFor(n, lines))
+    personDistance = sorted(data, key=keyFuncByTime, reverse=True)[-1]['distance']
     speed = reduce(getSmoothedSpeedMaths, data, {'weight': 0, 'weightedSpeed': 0})['speed']
-    travelAngle = getRoughAngle(data[-2], data[-1])
-    drawAngle = getRoughAngle(home, data[-1])
-    print(n + ": " + "Speed:       " + str(speed))
-    print(n + ": " + "travelAngle: " + str(travelAngle))
-    print(n + ": " + "draAngle:    " + str(drawAngle))
 
+    travelAngle = getRoughAngle(data[-2], data[-1])
+    houseAngle = getRoughAngle(data[-1], home)
+    personAngle = getGoodAngle(home, data[-1])
+    screenDistance = getScaleSpriteDistance(maxDistance)
+    scaleSize = getScaleSpriteSize(maxDistance)
+    personSprite = getPersonSprite(13, screenDistance, personDistance, personAngle)
+    print(n + ": Max Distance:      " + str(maxDistance))
+    print(n + ": Distance:          " + str(personDistance))
+    print(n + ": Screen Size Km:    " + str(screenDistance))
+    print(n + ": Speed:             " + str(speed))
+    print(n + ": Travel Angle:      " + str(travelAngle))
+    print(n + ": Scale Size:        " + str(scaleSize))
+    print(n + ": House Angle:       " + str(houseAngle))
+    print(n + ": Person Angle:      " + str(personAngle))
 
     unicornhathd.clear()
+    housePosition = getHousePosition(houseAngle)
     drawSpritePixels(getSpritePixels(
-        {'x': 4, 'y': 4},
+        housePosition,
         {'r': 100, 'g': 100, 'b': 255},
-        houseBig
+        houseSprite[scaleSize],
+        True
     ))
     drawSpritePixels(getSpritePixels(
-        {'x': 10, 'y': 10},
-        {'r': 100, 'g': 100, 'b': 255},
-        houseSmall
+        {'x': 15, 'y': 0},
+        {'r': 255, 'g': 255, 'b': 255},
+        getScaleSprite(False, scaleSize)
     ))
+
+    drawSpritePixels(getSpritePixels(
+        housePosition,
+        {'r': 255, 'g': 100, 'b': 100},
+        personSprite,
+    ))
+
     unicornhathd.show()
     time.sleep(5)
+
